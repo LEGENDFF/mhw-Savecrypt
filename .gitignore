@@ -1,0 +1,9 @@
+.settings/
+bin/
+my-repo/
+target/
+.classpath
+.project
+compile_.bat
+installfile.bat
+*.jar
