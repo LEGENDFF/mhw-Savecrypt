@@ -41,7 +41,7 @@
         </plugin>
     </plugins>
         
-    <finalName>mhwSavecrypt</finalName>
+    <finalName>IceborneSavecrypt</finalName>
     </build>
 
 
