@@ -289,176 +289,8 @@ public class Savecrypt {
 		
 		return newArray;
 	}
-
-	public static boolean isDecrypted(byte[] save) {
-		return save[0] == 1 && save[1] == 0 && save[2] == 0 && save[3] == 0;
-	}
 	
-	public static byte[] encryptBlowfish(byte[] save) throws GeneralSecurityException {
-		Cipher cipher = Cipher.getInstance("Blowfish/ecb/nopadding");
-		cipher.init(Cipher.ENCRYPT_MODE, BLOWFISH_KEY);
-		return changeEndianness(cipher.doFinal(changeEndianness(save)));
-	}
-	
-	public static byte[] decryptBlowfish(byte[] save) throws GeneralSecurityException {
-		Cipher cipher = Cipher.getInstance("Blowfish/ecb/nopadding");
-		cipher.init(Cipher.DECRYPT_MODE, BLOWFISH_KEY);
-		return changeEndianness(cipher.doFinal(changeEndianness(save)));
-	}
-	
-	public static boolean checkChecksum(byte[] save, byte[] checksum) {
-		return Arrays.equals(Arrays.copyOfRange(save, 12, 32), checksum);
-	}
-	
-	public static byte[] generateChecksum(byte[] save) throws GeneralSecurityException {
-		return changeEndianness(MessageDigest.getInstance("SHA-1").digest(Arrays.copyOfRange(save, 64, save.length)));
-	}
-	
-	public static byte[] setChecksum(byte[] save, byte[] checksum) {
-		System.arraycopy(checksum, 0, save, 12, 20);
-		return save;
-	}
-	
-	public static int readInt(byte[] arr, int ptr) {
-		return (arr[ptr] & 0xFF) | ((arr[ptr+1] & 0xFF) << 8) | ((arr[ptr+2] & 0xFF) << 16) | ((arr[ptr+3] & 0xFF) << 24);
-	}
-	
-	public static void decryptSave(String[] args) throws IOException, GeneralSecurityException {
-		Path saveFile = Paths.get(args[0]);
-		byte[] save = Files.readAllBytes(saveFile);
-		decryptSave(save);
-		Path decFile = Paths.get(args[0] + ".dec");
-		Files.write(decFile, save);
-	}
-	
-	public static byte[] decryptSave(byte[] save) throws IOException, GeneralSecurityException {
-		save = decryptBlowfish(save);
-		
-		if(!checkChecksum(save, generateChecksum(save))) {
-			System.out.println("WARNING: save has invalid checksum");
-		}
-		
-		decryptRegion(save, 0x70, 0xDA50);
-		decryptRegion(save, 0x3010D8, 0x2098C0);
-		decryptRegion(save, 0x50AB98, 0x2098C0);
-		decryptRegion(save, 0x714658, 0x2098C0);
-		
-		return save;
-	}
-	
-	public static void decryptRegion(byte[] save, int offset, int length) throws GeneralSecurityException {
-		Cipher cipher = Cipher.getInstance("AES/ecb/nopadding");
-		byte[] salt = new byte[0x200];
-		byte[][] keys = new byte[0x20][0x10];
-		int[] keyLength = new int[0x20];
-		int keySalt = crc32(0xA37A55D7, save, offset + length, 0x200);
-		int saveOffset = offset;
-		int saltOffset = 0;
-		
-		generateSalt(salt, keySalt);
-		generateKeys(keys, keySalt, salt);
-		generateKeyLength(keyLength, keySalt, length);
-		
-		for(int i = 0; i < 32; ++i) {
-			saltOffset = 0;
-			cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(keys[i], "AES"));
-			
-			while(saveOffset < keyLength[i] + offset) {
-				int branch = (salt[saltOffset & 0x1FF] & 1) == 0 ? 4 : 0;
-				save[saveOffset - branch + 4] ^= salt[saltOffset + 8 & 0x1FF];
-				save[saveOffset - branch + 5] ^= salt[saltOffset + 9 & 0x1FF];
-				save[saveOffset - branch + 6] ^= salt[saltOffset + 10 & 0x1FF];
-				save[saveOffset - branch + 7] ^= salt[saltOffset + 11 & 0x1FF];
-				
-				save[saveOffset - branch + 12] ^= salt[saltOffset + 12 & 0x1FF];
-				save[saveOffset - branch + 13] ^= salt[saltOffset + 13 & 0x1FF];
-				save[saveOffset - branch + 14] ^= salt[saltOffset + 14 & 0x1FF];
-				save[saveOffset - branch + 15] ^= salt[saltOffset + 15 & 0x1FF];
-				
-				cipher.doFinal(save, saveOffset, 16, save, saveOffset);
-				
-				save[saveOffset + branch + 0] ^= salt[saltOffset + 0 & 0x1FF];
-				save[saveOffset + branch + 1] ^= salt[saltOffset + 1 & 0x1FF];
-				save[saveOffset + branch + 2] ^= salt[saltOffset + 2 & 0x1FF];
-				save[saveOffset + branch + 3] ^= salt[saltOffset + 3 & 0x1FF];
-				
-				save[saveOffset + branch + 8] ^= salt[saltOffset + 4 & 0x1FF];
-				save[saveOffset + branch + 9] ^= salt[saltOffset + 5 & 0x1FF];
-				save[saveOffset + branch + 10] ^= salt[saltOffset + 6 & 0x1FF];
-				save[saveOffset + branch + 11] ^= salt[saltOffset + 7 & 0x1FF];
-				
-				saltOffset += 4;
-				saveOffset += 16;
-			}
-		}
-	}
-	
-	public static void encryptSave(String[] args) throws IOException, GeneralSecurityException {
-		Path saveFile = Paths.get(args[0]);
-		byte[] save = Files.readAllBytes(saveFile);
-		encryptSave(save);
-		Path decFile = Paths.get(args[0] + ".enc");
-		Files.write(decFile, save);
-	}
-	
-	public static byte[] encryptSave(byte[] save) throws IOException, GeneralSecurityException {
-		encryptRegion(save, 0x70, 0xDA50);
-		encryptRegion(save, 0x3010D8, 0x2098C0);
-		encryptRegion(save, 0x50AB98, 0x2098C0);
-		encryptRegion(save, 0x714658, 0x2098C0);
-		
-		setChecksum(save, generateChecksum(save));
-		save = encryptBlowfish(save);
-		
-		return save;
-	}
-	
-	public static void encryptRegion(byte[] save, int offset, int length) throws GeneralSecurityException {
-		Cipher cipher = Cipher.getInstance("AES/ecb/nopadding");
-		byte[] salt = new byte[0x200];
-		byte[][] keys = new byte[0x20][0x10];
-		int[] keyLength = new int[0x20];
-		int keySalt = crc32(0xA37A55D7, save, offset + length, 0x200);
-		int saveOffset = offset;
-		int saltOffset = 0;
-		
-		generateSalt(salt, keySalt);
-		generateKeys(keys, keySalt, salt);
-		generateKeyLength(keyLength, keySalt, length);
-		
-		for(int i = 0; i < 32; ++i) {
-			saltOffset = 0;
-			cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(keys[i], "AES"));
-			
-			while(saveOffset < keyLength[i] + offset) {
-				int branch = (salt[saltOffset & 0x1FF] & 1) == 0 ? 4 : 0;
-				save[saveOffset + branch + 0] ^= salt[saltOffset + 0 & 0x1FF];
-				save[saveOffset + branch + 1] ^= salt[saltOffset + 1 & 0x1FF];
-				save[saveOffset + branch + 2] ^= salt[saltOffset + 2 & 0x1FF];
-				save[saveOffset + branch + 3] ^= salt[saltOffset + 3 & 0x1FF];
-				
-				save[saveOffset + branch + 8] ^= salt[saltOffset + 4 & 0x1FF];
-				save[saveOffset + branch + 9] ^= salt[saltOffset + 5 & 0x1FF];
-				save[saveOffset + branch + 10] ^= salt[saltOffset + 6 & 0x1FF];
-				save[saveOffset + branch + 11] ^= salt[saltOffset + 7 & 0x1FF];
-				
-				cipher.doFinal(save, saveOffset, 16, save, saveOffset);
-				
-				save[saveOffset - branch + 4] ^= salt[saltOffset + 8 & 0x1FF];
-				save[saveOffset - branch + 5] ^= salt[saltOffset + 9 & 0x1FF];
-				save[saveOffset - branch + 6] ^= salt[saltOffset + 10 & 0x1FF];
-				save[saveOffset - branch + 7] ^= salt[saltOffset + 11 & 0x1FF];
-				
-				save[saveOffset - branch + 12] ^= salt[saltOffset + 12 & 0x1FF];
-				save[saveOffset - branch + 13] ^= salt[saltOffset + 13 & 0x1FF];
-				save[saveOffset - branch + 14] ^= salt[saltOffset + 14 & 0x1FF];
-				save[saveOffset - branch + 15] ^= salt[saltOffset + 15 & 0x1FF];
-				saltOffset += 4;
-				saveOffset += 16;
-			}
-		}
-	}
-	
+	//this is just standard CRC32, didn't use java.util.zip.CRC32 since that doesn't allow to set the initial value of the LFBSR
 	public static int crc32(int initialValue, byte[] data, int offset, int length) {
 		for(int i = offset; i < offset + length; ++i) {
 			int temp = (initialValue ^ data[i]) & 0xFF;
@@ -478,17 +310,190 @@ public class Savecrypt {
 		return initialValue;
 	}	
 	
-	public static void generateKeys(byte[][] keys, int keySalt, byte[] salt) {
-		final int c1 = 0x5A8B79A9 ^ keySalt;
-		final int c2 = 0x34616F90 ^ keySalt;
-		final int c3 = 0xC4C638DF ^ keySalt;
-		final int c4 = 0x94FB64E8 ^ keySalt;
+	public static int crc32(int initialValue, int[] data, int offset, int length) {
+		for(int i = offset; i < offset + length; ++i) {
+			for(int j = 0; j < 4; ++j) {
+				int temp = (initialValue ^ (data[i] >>> (8 * j))) & 0xFF;
+				
+				for(int k = 0; k < 8; ++k) {
+					if((temp & 1) == 1) {
+						temp >>>= 1;
+						temp ^= 0xEDB88320;
+					} else {
+						temp >>>= 1;
+					}
+				}
+				
+				initialValue >>>= 8;
+				initialValue ^= temp;
+			}
+		}
+		return initialValue;
+	}
+
+	public static boolean isDecrypted(byte[] save) {
+		return save[0] == 1 && save[1] == 0 && save[2] == 0 && save[3] == 0;
+	}
+	
+	public static byte[] generateHash(byte[] save) throws GeneralSecurityException {
+		return changeEndianness(MessageDigest.getInstance("SHA-1").digest(Arrays.copyOfRange(save, 64, save.length)));
+	}
+	
+	public static boolean checkHash(byte[] save, byte[] hash) {
+		return Arrays.equals(Arrays.copyOfRange(save, 12, 32), hash);
+	}
+	
+	public static byte[] setHash(byte[] save, byte[] hash) {
+		System.arraycopy(hash, 0, save, 12, 20);
+		return save;
+	}
+	
+	public static byte[] decryptSave(byte[] save) throws IOException, GeneralSecurityException {
+		save = decryptBlowfish(save);
+		
+		if(!checkHash(save, generateHash(save))) {
+			System.out.println("WARNING: save has invalid hash");
+		}
+		
+		decryptRegion(save, 0x70, 0xDA50, 3);
+		decryptRegion(save, 0x3010D8, 0x2098C0, 0);
+		decryptRegion(save, 0x50AB98, 0x2098C0, 1);
+		decryptRegion(save, 0x714658, 0x2098C0, 2);
+		
+		return save;
+	}
+	
+	public static byte[] decryptBlowfish(byte[] save) throws GeneralSecurityException {
+		Cipher cipher = Cipher.getInstance("Blowfish/ecb/nopadding");
+		cipher.init(Cipher.DECRYPT_MODE, BLOWFISH_KEY);
+		return changeEndianness(cipher.doFinal(changeEndianness(save)));
+	}
+	
+	public static void decryptRegion(byte[] save, int offset, int length, int saveSlot) throws GeneralSecurityException {
+		Cipher cipher = Cipher.getInstance("AES/ecb/nopadding");
+		int keySalt = crc32(0xA37A55D7, save, offset + length, 0x200);
+		int saveOffset = offset;
+		int saltOffset = 0;
+		
+		byte[] salt = generateSalt(keySalt);
+		byte[][] keys = generateKeys(keySalt, salt);
+		int[] keyLength = generateKeyLength(keySalt, length);
+		
+		for(int i = 0; i < 32; ++i) {
+			saltOffset = 0;
+			cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(keys[i], "AES"));
+			
+			while(saveOffset < keyLength[i] + offset) {
+				// if current salt is even, then salt 1st and 3rd word, decrypt, then salt 2nd and 4th word, otherwise do opposite
+				int branch = (salt[saltOffset & 0x1FF] & 1) == 0 ? 4 : 0;
+				save[saveOffset - branch + 4] ^= salt[saltOffset + 8 & 0x1FF];
+				save[saveOffset - branch + 5] ^= salt[saltOffset + 9 & 0x1FF];
+				save[saveOffset - branch + 6] ^= salt[saltOffset + 10 & 0x1FF];
+				save[saveOffset - branch + 7] ^= salt[saltOffset + 11 & 0x1FF];
+				
+				save[saveOffset - branch + 12] ^= salt[saltOffset + 12 & 0x1FF];
+				save[saveOffset - branch + 13] ^= salt[saltOffset + 13 & 0x1FF];
+				save[saveOffset - branch + 14] ^= salt[saltOffset + 14 & 0x1FF];
+				save[saveOffset - branch + 15] ^= salt[saltOffset + 15 & 0x1FF];
+				
+				cipher.doFinal(save, saveOffset, 16, save, saveOffset);
+				
+				save[saveOffset + branch + 0] ^= salt[saltOffset + 0 & 0x1FF];
+				save[saveOffset + branch + 1] ^= salt[saltOffset + 1 & 0x1FF];
+				save[saveOffset + branch + 2] ^= salt[saltOffset + 2 & 0x1FF];
+				save[saveOffset + branch + 3] ^= salt[saltOffset + 3 & 0x1FF];
+				
+				save[saveOffset + branch + 8] ^= salt[saltOffset + 4 & 0x1FF];
+				save[saveOffset + branch + 9] ^= salt[saltOffset + 5 & 0x1FF];
+				save[saveOffset + branch + 10] ^= salt[saltOffset + 6 & 0x1FF];
+				save[saveOffset + branch + 11] ^= salt[saltOffset + 7 & 0x1FF];
+				
+				saltOffset += 4;
+				saveOffset += 16;
+			}
+		}
+				
+		if(!checkChecksum(save, generateChecksum(save, offset, length, saveSlot), offset, length)) {
+			System.out.println("WARNING: save has invalid checksum");
+		}
+	}
+	
+	public static byte[] encryptSave(byte[] save) throws IOException, GeneralSecurityException {
+		encryptRegion(save, 0x70, 0xDA50, 3);
+		encryptRegion(save, 0x3010D8, 0x2098C0, 0);
+		encryptRegion(save, 0x50AB98, 0x2098C0, 1);
+		encryptRegion(save, 0x714658, 0x2098C0, 2);
+		
+		setHash(save, generateHash(save));
+		save = encryptBlowfish(save);
+		
+		return save;
+	}
+	
+	public static byte[] encryptBlowfish(byte[] save) throws GeneralSecurityException {
+		Cipher cipher = Cipher.getInstance("Blowfish/ecb/nopadding");
+		cipher.init(Cipher.ENCRYPT_MODE, BLOWFISH_KEY);
+		return changeEndianness(cipher.doFinal(changeEndianness(save)));
+	}
+	
+	public static void encryptRegion(byte[] save, int offset, int length, int saveSlot) throws GeneralSecurityException {
+		Cipher cipher = Cipher.getInstance("AES/ecb/nopadding");
+		byte[] checksum = generateChecksum(save, offset, length, saveSlot);
+		setChecksum(save, checksum, offset, length);
+		int keySalt = crc32(0xA37A55D7, checksum, 0, 0x200);
+		int saveOffset = offset;
+		int saltOffset = 0;
+		
+		byte[] salt = generateSalt(keySalt);
+		byte[][] keys = generateKeys(keySalt, salt);
+		int[] keyLength = generateKeyLength(keySalt, length);
+		
+		for(int i = 0; i < 32; ++i) {
+			saltOffset = 0;
+			cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(keys[i], "AES"));
+			
+			while(saveOffset < keyLength[i] + offset) {
+				// if current salt is even, then salt 2nd and 4th word, encrypt, then salt 1st and 3rd word, otherwise do opposite
+				int branch = (salt[saltOffset & 0x1FF] & 1) == 0 ? 4 : 0;
+				save[saveOffset + branch + 0] ^= salt[saltOffset + 0 & 0x1FF];
+				save[saveOffset + branch + 1] ^= salt[saltOffset + 1 & 0x1FF];
+				save[saveOffset + branch + 2] ^= salt[saltOffset + 2 & 0x1FF];
+				save[saveOffset + branch + 3] ^= salt[saltOffset + 3 & 0x1FF];
+				
+				save[saveOffset + branch + 8] ^= salt[saltOffset + 4 & 0x1FF];
+				save[saveOffset + branch + 9] ^= salt[saltOffset + 5 & 0x1FF];
+				save[saveOffset + branch + 10] ^= salt[saltOffset + 6 & 0x1FF];
+				save[saveOffset + branch + 11] ^= salt[saltOffset + 7 & 0x1FF];
+				
+				cipher.doFinal(save, saveOffset, 16, save, saveOffset);
+				
+				save[saveOffset - branch + 4] ^= salt[saltOffset + 8 & 0x1FF];
+				save[saveOffset - branch + 5] ^= salt[saltOffset + 9 & 0x1FF];
+				save[saveOffset - branch + 6] ^= salt[saltOffset + 10 & 0x1FF];
+				save[saveOffset - branch + 7] ^= salt[saltOffset + 11 & 0x1FF];
+				
+				save[saveOffset - branch + 12] ^= salt[saltOffset + 12 & 0x1FF];
+				save[saveOffset - branch + 13] ^= salt[saltOffset + 13 & 0x1FF];
+				save[saveOffset - branch + 14] ^= salt[saltOffset + 14 & 0x1FF];
+				save[saveOffset - branch + 15] ^= salt[saltOffset + 15 & 0x1FF];
+				saltOffset += 4;
+				saveOffset += 16;
+			}
+		}
+	}
+	
+	public static byte[][] generateKeys(int keySalt, byte[] salt) {
+		byte[][] keys = new byte[0x20][0x10];
+		final int c1 = 0x5A8B79A9 ^ keySalt; //0x5A8B79A9 = 0x84AFC3C8(INTEGER_CONSTANTS[0x5D7]) ^ 0xA37A55D7 ^ 0x7D5EEFB6
+		final int c2 = 0x34616F90 ^ keySalt; //0x5A8B79A9 = 0xEB9000B7(INTEGER_CONSTANTS[0x821]) ^ 0xA37A55D7 ^ 0x7C8B3AF0
+		final int c3 = 0xC4C638DF ^ keySalt; //0x5A8B79A9 = 0x3A226A4A(INTEGER_CONSTANTS[0xA6B]) ^ 0xA37A55D7 ^ 0x5D9E0742
+		final int c4 = 0x94FB64E8 ^ keySalt; //0x5A8B79A9 = 0x479C6C57(INTEGER_CONSTANTS[0xCB5]) ^ 0xA37A55D7 ^ 0x701D5D68
 		
 		int k = 0;
 		int encodedKeyIndex = 0;
 		
-		for(int i = 0; i < 32; ++i) {
-			encodedKeyIndex = readInt(salt, i << 2);
+		for(int i = 0; i < 0x20; ++i) {
+			encodedKeyIndex = (salt[(i << 2)] & 0xFF) | ((salt[(i << 2) + 1] & 0xFF) << 8) | ((salt[(i << 2) + 2] & 0xFF) << 16) | ((salt[(i << 2) + 3] & 0xFF) << 24);
 			k = encodedKeyIndex ^ c1;
 			keys[i][0] = (byte) (k);
 			keys[i][1] = (byte) (k >>> 0x8);
@@ -513,40 +518,114 @@ public class Savecrypt {
 			keys[i][14] = (byte) (k >>> 0x10);
 			keys[i][15] = (byte) (k >>> 0x18);
 		}
+		
+		return keys;
 	}
 
 	
-	public static void generateKeyLength(final int[] keyLength, final int keySalt, final int length) {
-		final int averageLengthInt = length >>> 5;
-		final float averageLengthFloat = (float)averageLengthInt;
+	public static int[] generateKeyLength(int keySalt, int length) {
+		int[] keyLength = new int[0x20];
+		int averageLengthInt = length >>> 5;
+		float averageLengthFloat = (float)averageLengthInt;
 		int expectedLength = averageLengthInt;
 		
 		for(int i = 0; i < 31; ++i) {
-			keyLength[i] = (int)((FLOAT_CONSTANTS[INTEGER_CONSTANTS[(keySalt + i) & 0xFFF ^ 0x5d7] & 0xFFF ^ 0x885] - 0.5F) * averageLengthFloat) + expectedLength + 0xF & 0xFFFFFFF0;
+			keyLength[i] = (int)((FLOAT_CONSTANTS[INTEGER_CONSTANTS[(keySalt + i) & 0xFFF ^ 0x5D7] & 0xFFF ^ 0x885] - 0.5F) * averageLengthFloat) + expectedLength + 0xF & 0xFFFFFFF0; // 0x5D7 = 0xA37A55D7 & 0xFFF, 0x885 = (0xA37A55D7 ^ 0x67308D52) & 0xFFF
 			expectedLength += averageLengthInt;
 		}
 		
 		keyLength[31] = length;
+		return keyLength;
 	}
 	
-	public static void generateSalt(final byte[] salt, final int keySalt) {
-		final int c = keySalt ^ 0x4bf0cf23;
-		int s = 0;
-		int offset = 0x5d7;
+	public static byte[] generateSalt(int keySalt) {
+		byte[] salt = new byte[0x200];
+		int c = keySalt ^ 0x4BF0CF23;
+		int saltInt = 0;
+		int offset = 0x5d7; // = 0xA37A55D7 & 0xFFF
 		int offsetChange = (keySalt >>> 0x18) + (keySalt >>> 0x10 & 0xFF) + (keySalt >>> 0x8 & 0xFF) + (keySalt & 0xFF) + 1;
 		for(int i = 0; i < 0x200; i += 4) {
-			s = INTEGER_CONSTANTS[offset & 0xFFF] ^ c;
-			if(((-(s & 0x7)) + 1) == 0)
-				s ^= 0xbd75f29;
+			saltInt = INTEGER_CONSTANTS[offset & 0xFFF] ^ c;
+			if((saltInt & 0x7) == 1)
+				saltInt ^= 0xBD75F29; // = crc32(0x1079000F, "ONSTER HUNTER WORLD: ICEBORNE".getBytes(StandardCharsets.UTF_8), 0, 0x1D)
 
-			salt[i] = (byte) s;
-			salt[i + 1] = (byte) (s >>> 0x8);
-			salt[i + 2] = (byte) (s >>> 0x10);
-			salt[i + 3] = (byte) (s >>> 0x18);
+			salt[i] = (byte) saltInt;
+			salt[i + 1] = (byte) (saltInt >>> 0x8);
+			salt[i + 2] = (byte) (saltInt >>> 0x10);
+			salt[i + 3] = (byte) (saltInt >>> 0x18);
 			
 			offset += offsetChange;
 		}
-	}	
+		
+		return salt;
+	}
+		
+	public static byte[] generateChecksum(byte[] save, int offset, int length, int saveSlot) {
+		byte[] checksum = new byte[0x200];
+		int[] constants = {0x55012174, 0x9FA3690, 0x4F5AE762, 0xA37A55D7};
+		int[] slotConstantsGenerator = {0x2EA10CEB, 0x204DE35E, 0x4BF0CF23, 0x72B401FD, 0x5CDD1F19, 0x681BA6CF, 0x626B4CA, 0x7C8B3AF0};
+		int lengthInt = length >>> 3;
+		
+		int[] hashLookup = new int[8];
+		int[] partialCrcs = new int[8];
+		int[] crcLengths = new int[8];
+		int[] slotConstants = new int[8];
+		
+		for(int i = 0; i < 8; ++i) {
+			slotConstants[i] = slotConstantsGenerator[i] ^ constants[-saveSlot - i - 1 & 3];
+		}
+		
+		for(int i = 0; i < 7; ++i) {
+			float variation = FLOAT_CONSTANTS[(slotConstants[i] + INTEGER_CONSTANTS[slotConstants[i] & 0xfff]) & 0xfff];
+			crcLengths[i] = (int)((variation-0.5F) * (float)lengthInt) + (i+1) * lengthInt;
+		}
+		crcLengths[7] = length;
+
+		int crcInit = slotConstants[0];
+		int currentLength = crcLengths[0];
+		for(int i = 0; i < 8; ++i) {
+			partialCrcs[i] = crc32(crcInit,save,offset,currentLength);
+			if(i < 7) {
+				offset += currentLength;
+				currentLength = crcLengths[i + 1] - crcLengths[i];
+				crcInit = partialCrcs[i] ^ slotConstants[i + 1];
+			}
+		}
+
+		for(int i = 0; i < 7; ++i) {
+			hashLookup[i] = slotConstants[i] ^ partialCrcs[i] ^ partialCrcs[7];
+		}
+		hashLookup[7] = slotConstants[7] ^ partialCrcs[7];
+
+		int nextIndex = crc32(crc32(0xA37A55D7 ^ constants[3 - saveSlot], slotConstants, 0, 8), partialCrcs, 0, 8);
+		int currentIndex;
+		int jump = (nextIndex >>> 24) + (nextIndex >> 16 & 0xFF) + (nextIndex >> 8 & 0xFF) + (nextIndex & 0xFF);
+		for(int i = 0; i < 0x200; i += 4) {
+			currentIndex = nextIndex & 0xFFF;
+			nextIndex = (nextIndex + jump + 1) & 0xFFF;
+			int checksumInt = INTEGER_CONSTANTS[currentIndex] ^ hashLookup[(INTEGER_CONSTANTS[currentIndex] + saveSlot) & 7];
+			if((INTEGER_CONSTANTS[currentIndex] & 0x7) == 1)
+				checksumInt ^= 0xBD75F29; // = crc32(0x1079000F, "ONSTER HUNTER WORLD: ICEBORNE".getBytes(StandardCharsets.UTF_8), 0, 0x1D)
+			checksum[i] = (byte) checksumInt;
+			checksum[i + 1] = (byte) (checksumInt >>> 0x8);
+			checksum[i + 2] = (byte) (checksumInt >>> 0x10);
+			checksum[i + 3] = (byte) (checksumInt >>> 0x18);
+		}
+		
+		return checksum;
+	}
+	
+	public static void setChecksum(byte[] save, byte[] checksum, int regionOffset, int regionLength) {
+		System.arraycopy(checksum, 0, save, regionOffset + regionLength, 0x200);
+	}
+	
+	public static byte[] getChecksum(byte[] save, int regionOffset, int regionLength) {
+		return Arrays.copyOfRange(save, regionOffset + regionLength, regionOffset + regionLength + 0x200);
+	}
+	
+	public static boolean checkChecksum(byte[] save, byte[] checksum, int regionOffset, int regionLength) {
+		return Arrays.equals(getChecksum(save, regionOffset, regionLength), checksum);
+	}
 	
 	public static void main(String[] args) throws IOException, GeneralSecurityException {
 		if(args.length == 0 || args.length > 3) {
